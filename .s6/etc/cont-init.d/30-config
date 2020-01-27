@@ -1,0 +1,36 @@
+#!/usr/bin/with-contenv bash
+
+## Redis
+## TODO: Ensure EscapeVector can start if redis is told not to
+if [[ -z "${REDIS_URL}" && -z "${REDIS_HOST}" ]]; then
+	# If container is mounted in a way that let sysfs be RW, make some changes for redis
+	if grep -q 'sysfs on /sys type sysfs\(.*\)rw' /proc/mounts; then
+		# Disable THP support? Probably useless to try in Docker
+		echo never > /sys/kernel/mm/transparent_hugepage/enabled
+
+		# Memory overcommit flag
+		sysctl vm.overcommit_memory=1
+	fi
+else
+	touch /etc/services.d/redis/down
+fi
+
+## EscapeVector
+# Pass process logs back to config folder if it's mounted/configured.
+if mountpoint -q /config; then
+	if [[ ! -d /config/log ]]; then
+		mkdir /config/log
+	fi
+	if [[ -d /app/log ]]; then
+		rm -R /app/log
+		ln -s /config/log /app/log
+	fi
+fi
+
+# Permissions fixes
+#mkdir -p /root/.npm/_logs
+
+chown -R abc:abc \
+	/app /config
+#	/app /config /usr/lib/node_modules /root
+

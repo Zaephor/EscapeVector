@@ -1,0 +1,17 @@
+#!/bin/execlineb -P
+
+# with-contenv
+s6-envdir -fn -- /var/run/s6/container_environment
+
+# Redirect stderr to stdout.
+fdmove -c 2 1
+
+cd /app
+
+# TODO: Add support to skip this if redis wasn't going to start anyway
+if { s6-svwait -U /var/run/s6/services/redis/ }
+
+s6-setuidgid abc
+
+/app/node_modules/.bin/actionhero start
+#/usr/bin/npm start

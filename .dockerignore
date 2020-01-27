@@ -1,0 +1,4 @@
+.git
+.travis
+node_modules
+public/javascript/ActionheroWebsocketClient.*js

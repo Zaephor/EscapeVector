@@ -1,0 +1,68 @@
+#!/bin/bash
+export DOCKER_CLI_EXPERIMENTAL=enabled
+
+echo "==== Identifying base image"
+FROM=$(awk '/^FROM/{print $NF}' "${DOCKERFILE_PATH}" | tail -n 1)
+echo "==== Base image: ${FROM}"
+
+echo "==== Identifying platforms supported by base image"
+# Get remote platforms
+if [[ -z "${PLATFORMS}" ]]; then
+        PLATFORMS=""
+        for PLAT in $(docker manifest inspect "${FROM}" | jq -c --raw-output '.manifests[].platform'); do
+                PLAT_OS=$(echo "${PLAT}" | jq -c --raw-output '.os')
+                PLAT_ARCH=$(echo "${PLAT}" | jq -c --raw-output '.architecture')
+                PLAT_VARIANT=$(echo "${PLAT}" | jq -c --raw-output '.variant')
+                if [[ -n "${PLATFORMS}" ]]; then
+                        PLATFORMS+=","
+                fi
+                PLATFORMS+="${PLAT_OS}/${PLAT_ARCH}"
+                if [[ -n "${PLAT_VARIANT}" && "${PLAT_VARIANT}" != "null" ]]; then
+                        PLATFORMS+="/${PLAT_VARIANT}"
+                fi
+        done
+fi
+if [[ -z "${PLATFORMS}" ]]; then
+        PLATFORMS="linux/amd64"
+fi
+echo "==== Identified platforms: ${PLATFORMS}"
+
+# Create buildx context
+echo "==== Creating builx context"
+docker buildx create --name ${CONTAINER}
+docker buildx use ${CONTAINER}
+docker buildx inspect --bootstrap
+
+echo "==== Identifying current commit version"
+CURRENT_VERSION=$(jq -c --raw-output '.version' package.json)
+git checkout HEAD^ package.json
+echo "==== Current commit version: ${CURRENT_VERSION}"
+
+echo "==== Identifying previous commit version"
+PREV_VERSION=$(jq -c --raw-output '.version' package.json)
+echo "==== Previous commit version: ${PREV_VERSION}"
+git reset package.json
+git checkout package.json
+
+echo "==== Calculating applicable tags"
+TAGS=()
+D_TAGS=()
+if [[ "${CURRENT_VERSION}" == "${PREV_VERSION}" ]]; then
+	TAGS+=( "-t" "${DOCKER_ORG}/${CONTAINER}:dev" )
+	D_TAGS+=( "dev" )
+else
+	TAGS+=( "-t" "${DOCKER_ORG}/${CONTAINER}:latest" )
+	D_TAGS+=( "latest" )
+	TAGS+=( "-t" "${DOCKER_ORG}/${CONTAINER}:v${CURRENT_VERSION}" )
+	D_TAGS+=( "${CURRENT_VERSION}" )
+	SUBTAG=${CURRENT_VERSION}
+	while [[ -n "${SUBTAG//[^.]}" ]]; do
+		SUBTAG=${SUBTAG%.**}
+		TAGS+=( "-t" "${DOCKER_ORG}/${CONTAINER}:v${SUBTAG}" )
+		D_TAGS+=( "${SUBTAG}" )
+	done
+fi
+echo "==== Tags calculated: ${D_TAGS[@]}"
+
+echo "==== Initiating builds for all platforms"
+docker buildx build --platform "${PLATFORMS}" ${TAGS[@]} -f "${DOCKERFILE_PATH}" --push .
